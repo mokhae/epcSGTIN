@@ -175,22 +175,40 @@ func Encode(input SGTINInput) (*SGTIN, error) {
 }
 
 func decodeSGTIN96(binStr string) (*SGTIN, error) {
+	if len(binStr) < 96 {
+		return nil, fmt.Errorf("SGTIN-96 data too short: %d bits (96 bits required)", len(binStr))
+	}
+	if err := validateBinary(binStr[:96]); err != nil {
+		return nil, fmt.Errorf("SGTIN-96 invalid binary string: %w", err)
+	}
+
 	filter, _ := strconv.ParseInt(binStr[8:11], 2, 64)
 	partition, _ := strconv.ParseInt(binStr[11:14], 2, 64)
 	pInfo, ok := partitionMap[partition]
 	if !ok {
-		return nil, fmt.Errorf("유효하지 않은 파티션 값: %d", partition)
+		return nil, fmt.Errorf("invalid partition value: %d", partition)
 	}
 	cursor := 14
 
-	compVal, _ := strconv.ParseInt(binStr[cursor:cursor+pInfo.CompanyPrefixBits], 2, 64)
+	end := cursor + pInfo.CompanyPrefixBits
+	if end > len(binStr) {
+		return nil, fmt.Errorf("company prefix bits out of range (cursor=%d, bits=%d, len=%d)", cursor, pInfo.CompanyPrefixBits, len(binStr))
+	}
+	compVal, _ := strconv.ParseInt(binStr[cursor:end], 2, 64)
 	compStr := fmt.Sprintf("%0*d", pInfo.CompanyPrefixDigs, compVal)
-	cursor += pInfo.CompanyPrefixBits
+	cursor = end
 
-	itemVal, _ := strconv.ParseInt(binStr[cursor:cursor+pInfo.ItemRefBits], 2, 64)
+	end = cursor + pInfo.ItemRefBits
+	if end > len(binStr) {
+		return nil, fmt.Errorf("item reference bits out of range (cursor=%d, bits=%d, len=%d)", cursor, pInfo.ItemRefBits, len(binStr))
+	}
+	itemVal, _ := strconv.ParseInt(binStr[cursor:end], 2, 64)
 	itemStr := fmt.Sprintf("%0*d", pInfo.ItemRefDigs, itemVal)
-	cursor += pInfo.ItemRefBits
+	cursor = end
 
+	if cursor+38 > len(binStr) {
+		return nil, fmt.Errorf("serial bits out of range (cursor=%d, len=%d)", cursor, len(binStr))
+	}
 	serialVal, _ := strconv.ParseInt(binStr[cursor:cursor+38], 2, 64)
 
 	return &SGTIN{
@@ -205,21 +223,37 @@ func decodeSGTIN96(binStr string) (*SGTIN, error) {
 }
 
 func decodeSGTIN198(binStr string) (*SGTIN, error) {
+	const minBits = 14 + 44 // header(8) + filter(3) + partition(3) + min company+item bits
+	if len(binStr) < minBits {
+		return nil, fmt.Errorf("SGTIN-198 data too short: %d bits (%d bits required)", len(binStr), minBits)
+	}
+	if err := validateBinary(binStr); err != nil {
+		return nil, fmt.Errorf("SGTIN-198 invalid binary string: %w", err)
+	}
+
 	filter, _ := strconv.ParseInt(binStr[8:11], 2, 64)
 	partition, _ := strconv.ParseInt(binStr[11:14], 2, 64)
 	pInfo, ok := partitionMap[partition]
 	if !ok {
-		return nil, fmt.Errorf("유효하지 않은 파티션 값: %d", partition)
+		return nil, fmt.Errorf("invalid partition value: %d", partition)
 	}
 	cursor := 14
 
-	compVal, _ := strconv.ParseInt(binStr[cursor:cursor+pInfo.CompanyPrefixBits], 2, 64)
+	end := cursor + pInfo.CompanyPrefixBits
+	if end > len(binStr) {
+		return nil, fmt.Errorf("company prefix bits out of range (cursor=%d, bits=%d, len=%d)", cursor, pInfo.CompanyPrefixBits, len(binStr))
+	}
+	compVal, _ := strconv.ParseInt(binStr[cursor:end], 2, 64)
 	compStr := fmt.Sprintf("%0*d", pInfo.CompanyPrefixDigs, compVal)
-	cursor += pInfo.CompanyPrefixBits
+	cursor = end
 
-	itemVal, _ := strconv.ParseInt(binStr[cursor:cursor+pInfo.ItemRefBits], 2, 64)
+	end = cursor + pInfo.ItemRefBits
+	if end > len(binStr) {
+		return nil, fmt.Errorf("item reference bits out of range (cursor=%d, bits=%d, len=%d)", cursor, pInfo.ItemRefBits, len(binStr))
+	}
+	itemVal, _ := strconv.ParseInt(binStr[cursor:end], 2, 64)
 	itemStr := fmt.Sprintf("%0*d", pInfo.ItemRefDigs, itemVal)
-	cursor += pInfo.ItemRefBits
+	cursor = end
 
 	serialBits := binStr[cursor:]
 	if len(serialBits) > 140 {
@@ -264,4 +298,13 @@ func isNumeric(s string) bool {
 		}
 	}
 	return true
+}
+
+func validateBinary(s string) error {
+	for i, c := range s {
+		if c != '0' && c != '1' {
+			return fmt.Errorf("invalid character '%c' at position %d", c, i)
+		}
+	}
+	return nil
 }
